@@ -89,4 +89,91 @@ Enhance detection performance by fine-tuning the YOLOv5 model on a custom datase
 Add support for video file input instead of live camera feed.
 
 
+## Code
+
+Here is the Python code for real-time object detection and MongoDB integration:
+
+```python
+import cv2
+import torch
+from ultralytics import YOLO
+import numpy as np
+from pymongo import MongoClient
+import gridfs
+import os
+import matplotlib.pyplot as plt  # Added for displaying images
+
+# MongoDB Setup
+client = MongoClient("mongodb://localhost:27017/")
+db = client["image_database"]
+fs = gridfs.GridFS(db)
+
+# Load the YOLOv5 model (small version for faster inference)
+model = YOLO("yolov5s.pt")  # You can use other versions like 'yolov5m', 'yolov5l', or 'yolov5x'
+
+# Open the device camera (0 is usually the default camera)
+cap = cv2.VideoCapture(0)
+
+if not cap.isOpened():
+    print("Error: Could not open camera.")
+    exit()
+
+frame_counter = 0  # To keep track of saved frames
+
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
+
+    if not ret:
+        print("Error: Failed to capture image.")
+        break
+
+    # Perform detection on the current frame
+    results = model(frame)  # Perform inference using the frame as input
+
+    # Get predictions (boxes, class labels, and confidences)
+    boxes = results[0].boxes  # Detected bounding boxes
+    labels = results[0].names  # Class names
+    probs = boxes.conf  # Confidence scores
+
+    # Check if any objects are detected
+    if len(boxes) > 0:
+        # Draw bounding boxes on the frame
+        for box, label, prob in zip(boxes.xyxy, boxes.cls, probs):
+            x1, y1, x2, y2 = map(int, box.tolist())  # Get the coordinates of the bounding box
+            label_name = labels[int(label)]  # Get the class name
+            confidence = prob.item()  # Get the confidence score
+
+            # Draw the bounding box and label
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Draw the rectangle (green color)
+            cv2.putText(frame, f'{label_name} {confidence:.2f}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        # Save the frame with detections as a JPEG image in memory
+        _, buffer = cv2.imencode(".jpg", frame)
+
+        # Upload the frame to MongoDB
+        fs.put(buffer.tobytes(), filename=f"detected_frame_{frame_counter}.jpg")
+        print(f"Frame {frame_counter} uploaded to MongoDB.")
+        frame_counter += 1
+
+        # Display the frame in the console (additional functionality)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert to RGB format for Matplotlib
+        plt.figure(figsize=(10, 6))
+        plt.imshow(frame_rgb)
+        plt.axis('off')  # Hide axes
+        plt.show()
+    else:
+        print("No objects detected.")
+
+    # Display the frame in a window
+    cv2.imshow("YOLO Detection", frame)
+
+    # Break the loop if the user presses the 'q' key
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the camera and close any open OpenCV windows
+cap.release()
+cv2.destroyAllWindows()
+
 
